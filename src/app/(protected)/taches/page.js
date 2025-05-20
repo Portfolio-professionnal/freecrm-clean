@@ -6,6 +6,8 @@ import { useClients } from "@/hooks/useClients";
 import { useProspects } from "@/hooks/useProspects";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
+import SearchSelect from "@/components/ui/SearchSelect";
+import SearchBar from "@/components/ui/SearchBar";
 
 export default function TachesPage() {
   const { user } = useAuth();
@@ -22,7 +24,9 @@ export default function TachesPage() {
     client_id: null,
     prospect_id: null
   });
-  const [filter, setFilter] = useState("all"); // "all", "today", "week", "overdue"
+  const [filter, setFilter] = useState("all");
+  const [filteredTaches, setFilteredTaches] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     if (user) {
@@ -31,6 +35,57 @@ export default function TachesPage() {
       fetchProspects();
     }
   }, [user]);
+
+  // Appliquer le filtre et la recherche lorsque les tâches changent
+  useEffect(() => {
+    applyFiltersAndSearch();
+  }, [taches, filter, searchTerm]);
+
+  const applyFiltersAndSearch = () => {
+    let filtered = [...taches];
+    
+    // Appliquer le filtre par statut/date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const nextWeek = new Date(today);
+    nextWeek.setDate(today.getDate() + 7);
+    
+    switch (filter) {
+      case "today":
+        filtered = filtered.filter(tache => {
+          const date = new Date(tache.date_echeance);
+          date.setHours(0, 0, 0, 0);
+          return date.getTime() === today.getTime();
+        });
+        break;
+      case "week":
+        filtered = filtered.filter(tache => {
+          const date = new Date(tache.date_echeance);
+          date.setHours(0, 0, 0, 0);
+          return date.getTime() >= today.getTime() && date.getTime() <= nextWeek.getTime();
+        });
+        break;
+      case "overdue":
+        filtered = filtered.filter(tache => {
+          const date = new Date(tache.date_echeance);
+          date.setHours(0, 0, 0, 0);
+          return date.getTime() < today.getTime() && tache.statut !== "terminée";
+        });
+        break;
+    }
+    
+    // Appliquer la recherche textuelle
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(tache => 
+        tache.titre.toLowerCase().includes(term) ||
+        (tache.description && tache.description.toLowerCase().includes(term))
+      );
+    }
+    
+    setFilteredTaches(filtered);
+  };
 
   const handleCreateTache = async (e) => {
     e.preventDefault();
@@ -49,6 +104,10 @@ export default function TachesPage() {
     setIsModalOpen(false);
   };
 
+  const handleSearch = (term) => {
+    setSearchTerm(term);
+  };
+
   const handleMarkAsDone = async (id) => {
     await markAsDone(id);
   };
@@ -56,40 +115,6 @@ export default function TachesPage() {
   const handleDeleteTache = async (id) => {
     if (confirm("Êtes-vous sûr de vouloir supprimer cette tâche ?")) {
       await deleteTache(id);
-    }
-  };
-
-  // Fonction pour filtrer les tâches
-  const filteredTaches = () => {
-    if (!taches.length) return [];
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const nextWeek = new Date(today);
-    nextWeek.setDate(today.getDate() + 7);
-    
-    switch (filter) {
-      case "today":
-        return taches.filter(tache => {
-          const date = new Date(tache.date_echeance);
-          date.setHours(0, 0, 0, 0);
-          return date.getTime() === today.getTime();
-        });
-      case "week":
-        return taches.filter(tache => {
-          const date = new Date(tache.date_echeance);
-          date.setHours(0, 0, 0, 0);
-          return date.getTime() >= today.getTime() && date.getTime() <= nextWeek.getTime();
-        });
-      case "overdue":
-        return taches.filter(tache => {
-          const date = new Date(tache.date_echeance);
-          date.setHours(0, 0, 0, 0);
-          return date.getTime() < today.getTime() && tache.statut !== "terminée";
-        });
-      default:
-        return taches;
     }
   };
 
@@ -109,6 +134,17 @@ export default function TachesPage() {
     const options = { day: '2-digit', month: '2-digit', year: 'numeric' };
     return new Date(dateString).toLocaleDateString('fr-FR', options);
   };
+
+  // Préparer les options pour les clients et prospects pour le SearchSelect
+  const clientOptions = clients.map(client => ({
+    value: client.id,
+    label: client.nom
+  }));
+  
+  const prospectOptions = prospects.map(prospect => ({
+    value: prospect.id,
+    label: prospect.nom
+  }));
 
   if (!user) {
     return <div>Chargement...</div>;
@@ -158,6 +194,9 @@ export default function TachesPage() {
       </header>
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {/* Barre de recherche */}
+        <SearchBar onSearch={handleSearch} placeholder="Rechercher une tâche..." />
+        
         {/* Filtres */}
         <div className="mb-6 flex flex-wrap gap-2">
           <button
@@ -194,73 +233,77 @@ export default function TachesPage() {
             onClick={() => setFilter("overdue")}
             className={`px-4 py-2 rounded-md text-sm font-medium ${
               filter === "overdue" 
-                ? "bg-red-600 text-white" 
+                ? "bg-blue-600 text-white" 
                 : "bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
             En retard
           </button>
         </div>
-
+        
         {loading ? (
           <div className="text-center py-12">Chargement...</div>
-        ) : filteredTaches().length === 0 ? (
+        ) : filteredTaches.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-500 mb-4">Aucune tâche trouvée pour ce filtre.</p>
+            <p className="text-gray-500 mb-4">
+              {taches.length === 0 
+                ? "Vous n'avez pas encore de tâches." 
+                : "Aucune tâche ne correspond à vos critères."}
+            </p>
             <button 
               onClick={() => setIsModalOpen(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
             >
-              Créer une tâche
+              Ajouter une tâche
             </button>
           </div>
         ) : (
           <div className="bg-white shadow overflow-hidden sm:rounded-md">
             <ul className="divide-y divide-gray-200">
-              {filteredTaches().map((tache) => (
+              {filteredTaches.map(tache => (
                 <li key={tache.id}>
-                  <div className="px-4 py-4 sm:px-6 hover:bg-gray-50">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={tache.statut === "terminée"}
-                          onChange={() => tache.statut !== "terminée" && handleMarkAsDone(tache.id)}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <p className={`ml-3 text-sm font-medium ${tache.statut === "terminée" ? "line-through text-gray-400" : "text-gray-900"}`}>
+                  <div className="px-4 py-4 sm:px-6 flex items-center justify-between">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        checked={tache.statut === "terminée"}
+                        onChange={() => handleMarkAsDone(tache.id)}
+                      />
+                      <div className="ml-3 flex flex-col">
+                        <span className={`text-lg font-medium ${tache.statut === "terminée" ? "line-through text-gray-400" : "text-gray-900"}`}>
                           {tache.titre}
-                        </p>
-                      </div>
-                      <div className="ml-2 flex-shrink-0 flex">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(tache.priorite)}`}>
-                          {tache.priorite}
                         </span>
+                        {tache.description && (
+                          <span className="text-sm text-gray-500">{tache.description}</span>
+                        )}
+                        <div className="mt-2 flex items-center text-sm text-gray-500">
+                          <span className="mr-2">Échéance: {formatDate(tache.date_echeance)}</span>
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(tache.priorite)}`}>
+                            {tache.priorite.charAt(0).toUpperCase() + tache.priorite.slice(1)}
+                          </span>
+                          {tache.client_id && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Client: {clients.find(c => c.id === tache.client_id)?.nom || "Inconnu"}
+                            </span>
+                          )}
+                          {tache.prospect_id && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                              Prospect: {prospects.find(p => p.id === tache.prospect_id)?.nom || "Inconnu"}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="mt-2 sm:flex sm:justify-between">
-                      <div className="sm:flex">
-                        {(tache.client || tache.prospect) && (
-                          <p className="flex items-center text-sm text-gray-500">
-                            {tache.client ? (
-                              <span>Client: {tache.client.nom}</span>
-                            ) : (
-                              <span>Prospect: {tache.prospect.nom}</span>
-                            )}
-                          </p>
-                        )}
-                      </div>
-                      <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-                        <p>
-                          Échéance: {formatDate(tache.date_echeance)}
-                        </p>
-                        <button
-                          onClick={() => handleDeleteTache(tache.id)}
-                          className="ml-4 text-red-600 hover:text-red-900"
-                        >
-                          Supprimer
-                        </button>
-                      </div>
+                    <div>
+                      <button
+                        onClick={() => handleDeleteTache(tache.id)}
+                        className="ml-2 text-red-600 hover:text-red-900"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 </li>
@@ -271,7 +314,7 @@ export default function TachesPage() {
 
         {/* Modal pour créer une tâche */}
         {isModalOpen && (
-          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg overflow-hidden shadow-xl max-w-md w-full">
               <div className="px-4 py-5 sm:p-6">
                 <h3 className="text-lg font-medium text-gray-900">Créer une nouvelle tâche</h3>
@@ -291,9 +334,9 @@ export default function TachesPage() {
                     <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
                     <textarea
                       id="description"
+                      rows={3}
                       value={newTache.description}
                       onChange={(e) => setNewTache({...newTache, description: e.target.value})}
-                      rows={3}
                       className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
                     />
                   </div>
@@ -323,39 +366,44 @@ export default function TachesPage() {
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="client_id" className="block text-sm font-medium text-gray-700">Client associé</label>
-                    <select
-                      id="client_id"
-                      value={newTache.client_id || ""}
-                      onChange={(e) => {
-                        const value = e.target.value ? parseInt(e.target.value) : null;
-                        setNewTache({...newTache, client_id: value, prospect_id: null});
-                      }}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    >
-                      <option value="">Aucun client</option>
-                      {clients.map(client => (
-                        <option key={client.id} value={client.id}>{client.nom}</option>
-                      ))}
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700">Lié à un client</label>
+                    <div className="mt-1">
+                      <SearchSelect
+                        options={clientOptions}
+                        value={newTache.client_id}
+                        onChange={(value) => {
+                          setNewTache({
+                            ...newTache, 
+                            client_id: value,
+                            // Désélectionner le prospect si un client est sélectionné
+                            prospect_id: value ? null : newTache.prospect_id
+                          });
+                        }}
+                        placeholder="Sélectionner un client (optionnel)"
+                      />
+                    </div>
                   </div>
                   <div>
-                    <label htmlFor="prospect_id" className="block text-sm font-medium text-gray-700">Prospect associé</label>
-                    <select
-                      id="prospect_id"
-                      value={newTache.prospect_id || ""}
-                      onChange={(e) => {
-                        const value = e.target.value ? parseInt(e.target.value) : null;
-                        setNewTache({...newTache, prospect_id: value, client_id: null});
-                      }}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                      disabled={newTache.client_id !== null}
-                    >
-                      <option value="">Aucun prospect</option>
-                      {prospects.map(prospect => (
-                        <option key={prospect.id} value={prospect.id}>{prospect.nom}</option>
-                      ))}
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700">Lié à un prospect</label>
+                    <div className="mt-1">
+                      <SearchSelect
+                        options={prospectOptions}
+                        value={newTache.prospect_id}
+                        onChange={(value) => {
+                          setNewTache({
+                            ...newTache,
+                            prospect_id: value,
+                            // Désélectionner le client si un prospect est sélectionné
+                            client_id: value ? null : newTache.client_id
+                          });
+                        }}
+                        placeholder="Sélectionner un prospect (optionnel)"
+                        disabled={newTache.client_id !== null}
+                      />
+                    </div>
+                    {newTache.client_id && (
+                      <p className="mt-1 text-sm text-gray-500">Le prospect ne peut pas être sélectionné si un client est déjà associé.</p>
+                    )}
                   </div>
                   <div className="flex justify-end space-x-3 mt-6">
                     <button

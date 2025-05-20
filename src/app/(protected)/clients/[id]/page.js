@@ -1,0 +1,3 @@
+"use client";
+
+// Le code complet du fichier page.js...

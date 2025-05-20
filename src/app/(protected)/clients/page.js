@@ -5,12 +5,14 @@ import { useClients } from "@/hooks/useClients";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import SearchBar from "@/components/ui/SearchBar";
 
 export default function ClientsPage() {
   const { user } = useAuth();
   const { clients, loading, error, fetchClients, createClient, deleteClient } = useClients();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newClient, setNewClient] = useState({ nom: "", email: "", telephone: "" });
+  const [filteredClients, setFilteredClients] = useState([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -18,6 +20,10 @@ export default function ClientsPage() {
       fetchClients();
     }
   }, [user]);
+
+  useEffect(() => {
+    setFilteredClients(clients);
+  }, [clients]);
 
   const handleCreateClient = async (e) => {
     e.preventDefault();
@@ -33,6 +39,22 @@ export default function ClientsPage() {
     if (confirm("Êtes-vous sûr de vouloir supprimer ce client ?")) {
       await deleteClient(id);
     }
+  };
+
+  const handleSearch = (term) => {
+    if (!term.trim()) {
+      setFilteredClients(clients);
+      return;
+    }
+    
+    const lowercasedTerm = term.toLowerCase();
+    const results = clients.filter(client => 
+      client.nom.toLowerCase().includes(lowercasedTerm) ||
+      (client.email && client.email.toLowerCase().includes(lowercasedTerm)) ||
+      (client.telephone && client.telephone.toLowerCase().includes(lowercasedTerm))
+    );
+    
+    setFilteredClients(results);
   };
 
   if (!user) {
@@ -83,15 +105,22 @@ export default function ClientsPage() {
       </header>
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {/* Barre de recherche */}
+        <SearchBar onSearch={handleSearch} placeholder="Rechercher un client..." />
+        
         {loading ? (
           <div className="text-center py-12">Chargement...</div>
         ) : error ? (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
             Erreur: {error}
           </div>
-        ) : clients.length === 0 ? (
+        ) : filteredClients.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-500 mb-4">Vous n'avez pas encore de clients.</p>
+            <p className="text-gray-500 mb-4">
+              {clients.length === 0 
+                ? "Vous n'avez pas encore de clients." 
+                : "Aucun client ne correspond à votre recherche."}
+            </p>
             <button 
               onClick={() => setIsModalOpen(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -101,7 +130,7 @@ export default function ClientsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {clients.map(client => (
+            {filteredClients.map(client => (
               <div 
                 key={client.id} 
                 className="bg-white overflow-hidden shadow rounded-lg cursor-pointer hover:shadow-md"
@@ -127,7 +156,7 @@ export default function ClientsPage() {
 
         {/* Modal pour créer un client */}
         {isModalOpen && (
-          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg overflow-hidden shadow-xl max-w-md w-full">
               <div className="px-4 py-5 sm:p-6">
                 <h3 className="text-lg font-medium text-gray-900">Créer un nouveau client</h3>

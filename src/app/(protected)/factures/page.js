@@ -1,88 +1,290 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useFactures } from "@/hooks/useFactures";
-import { useClients } from "@/hooks/useClients";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
-export default function FacturesPage() {
+export default function FacturesSimplePage() {
   const { user } = useAuth();
-  const { factures, loading, error, fetchFactures, createFacture, markAsSent, markAsPaid, deleteFacture } = useFactures();
-  const { clients, fetchClients } = useClients();
+  const [factures, setFactures] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newFacture, setNewFacture] = useState({
-    numero: `F-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
+    numero: `F-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}`,
     date_emission: new Date().toISOString().split("T")[0],
     date_echeance: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString().split("T")[0],
     client_id: "",
+    client_nom: "", // Nom du client stocké directement
     montant_ht: "",
     taux_tva: 20,
     montant_ttc: "",
-    statut: "brouillon"
+    statut: "brouillon",
+    conditions_paiement: "Paiement à 30 jours",
+    notes: ""
   });
-  const [filter, setFilter] = useState("all"); // "all", "draft", "sent", "overdue", "paid"
-  const router = useRouter();
+  const [filter, setFilter] = useState("all");
 
   useEffect(() => {
     if (user) {
-      fetchFactures();
-      fetchClients();
+      loadFactures();
+      loadClients();
     }
   }, [user]);
 
-  const handleCreateFacture = async (e) => {
+  async function loadFactures() {
+    setLoading(true);
+    try {
+      // Requête simple sans jointure
+      const { data, error } = await supabase
+        .from("factures")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      
+      if (error) throw error;
+      
+      // Maintenant, récupérez les infos des clients pour enrichir les factures
+      if (data && data.length > 0) {
+        const clientIds = data
+          .filter(f => f.client_id)
+          .map(f => f.client_id);
+        
+        // Si nous avons des ID clients, récupérez leurs informations
+        let clientsData = [];
+        if (clientIds.length > 0) {
+          const { data: clientsResult } = await supabase
+            .from("clients")
+            .select("id, nom")
+            .in("id", clientIds);
+          
+          clientsData = clientsResult || [];
+        }
+        
+        // Enrichir les données des factures avec les noms des clients
+        const enrichedData = data.map(facture => {
+          const client = clientsData.find(c => c.id === facture.client_id);
+          return {
+            ...facture,
+            client_nom: client ? client.nom : "Client inconnu"
+          };
+        });
+        
+        setFactures(enrichedData);
+      } else {
+        setFactures([]);
+      }
+    } catch (err) {
+      console.error("Erreur lors du chargement des factures:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadClients() {
+    try {
+      const { data, error } = await supabase
+        .from("clients")
+        .select("id, nom")
+        .eq("user_id", user.id);
+      
+      if (error) throw error;
+      
+      setClients(data || []);
+    } catch (err) {
+      console.error("Erreur lors du chargement des clients:", err);
+    }
+  }
+
+  async function handleCreateFacture(e) {
     e.preventDefault();
     
-    // Validation basique
-    if (!newFacture.numero || !newFacture.date_emission || !newFacture.date_echeance || !newFacture.client_id || !newFacture.montant_ht) {
+    try {
+      if (!newFacture.client_id) {
+        alert("Veuillez sélectionner un client");
+        return;
+      }
+      
+      if (!newFacture.montant_ht || isNaN(parseFloat(newFacture.montant_ht))) {
+        alert("Veuillez saisir un montant HT valide");
+        return;
+      }
+      
+      // Calculer le montant TTC
+      const montantHT = parseFloat(newFacture.montant_ht);
+      const tauxTVA = parseFloat(newFacture.taux_tva);
+      const montantTTC = montantHT * (1 + tauxTVA / 100);
+      
+      // Trouver le nom du client
+      const client = clients.find(c => c.id === parseInt(newFacture.client_id));
+      const clientNom = client ? client.nom : "Client inconnu";
+
+      const factureData = {
+        user_id: user.id,
+        numero: newFacture.numero,
+        date_emission: newFacture.date_emission,
+        date_echeance: newFacture.date_echeance,
+        client_id: parseInt(newFacture.client_id),
+        montant_ht: montantHT,
+        taux_tva: tauxTVA,
+        montant_ttc: montantTTC,
+        statut: newFacture.statut,
+        conditions_paiement: newFacture.conditions_paiement,
+        notes: newFacture.notes,
+        created_at: new Date().toISOString()
+      };
+      
+      console.log("Création de facture avec données:", factureData);
+      
+      const { data, error } = await supabase
+        .from("factures")
+        .insert([factureData])
+        .select();
+      
+      if (error) {
+        console.error("Erreur Supabase:", error);
+        throw error;
+      }
+      
+      console.log("Facture créée:", data);
+      
+      if (data && data.length > 0) {
+        // Ajouter le nom du client manuellement à l'objet
+        const newFactureWithClient = {
+          ...data[0],
+          client_nom: clientNom
+        };
+        
+        setFactures(prev => [newFactureWithClient, ...prev]);
+        setIsModalOpen(false);
+        setNewFacture({
+          numero: `F-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}`,
+          date_emission: new Date().toISOString().split("T")[0],
+          date_echeance: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString().split("T")[0],
+          client_id: "",
+          client_nom: "",
+          montant_ht: "",
+          taux_tva: 20,
+          montant_ttc: "",
+          statut: "brouillon",
+          conditions_paiement: "Paiement à 30 jours",
+          notes: ""
+        });
+        
+        alert("Facture créée avec succès");
+      }
+    } catch (err) {
+      console.error("Erreur détaillée:", err);
+      setError(err.message);
+      alert("Erreur: " + err.message);
+    }
+  }
+  
+  async function handleMarkAsSent(id, e) {
+    e.stopPropagation();
+    try {
+      const { error } = await supabase
+        .from("factures")
+        .update({ 
+          statut: "envoyée", 
+          date_envoi: new Date().toISOString() 
+        })
+        .eq("id", id)
+        .eq("user_id", user.id);
+      
+      if (error) throw error;
+      
+      // Mettre à jour l'état local
+      setFactures(prev => prev.map(facture => {
+        if (facture.id === id) {
+          return { ...facture, statut: "envoyée", date_envoi: new Date().toISOString() };
+        }
+        return facture;
+      }));
+      
+      alert("Facture marquée comme envoyée");
+    } catch (err) {
+      console.error("Erreur:", err);
+      alert("Erreur: " + err.message);
+    }
+  }
+  
+  async function handleMarkAsPaid(id, e) {
+    e.stopPropagation();
+    try {
+      const { error } = await supabase
+        .from("factures")
+        .update({ 
+          statut: "payée", 
+          date_paiement: new Date().toISOString() 
+        })
+        .eq("id", id)
+        .eq("user_id", user.id);
+      
+      if (error) throw error;
+      
+      // Mettre à jour l'état local
+      setFactures(prev => prev.map(facture => {
+        if (facture.id === id) {
+          return { ...facture, statut: "payée", date_paiement: new Date().toISOString() };
+        }
+        return facture;
+      }));
+      
+      alert("Facture marquée comme payée");
+    } catch (err) {
+      console.error("Erreur:", err);
+      alert("Erreur: " + err.message);
+    }
+  }
+  
+  async function handleDeleteFacture(id, e) {
+    e.stopPropagation();
+    if (!confirm("Êtes-vous sûr de vouloir supprimer cette facture ?")) {
       return;
     }
     
-    // Calculer le montant TTC
-    const montantTTC = parseFloat(newFacture.montant_ht) * (1 + parseFloat(newFacture.taux_tva) / 100);
-    
-    await createFacture({
-      ...newFacture,
-      client_id: parseInt(newFacture.client_id),
-      montant_ht: parseFloat(newFacture.montant_ht),
-      montant_ttc: montantTTC
-    });
-    
-    // Réinitialiser le formulaire
-    setNewFacture({
-      numero: `F-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
-      date_emission: new Date().toISOString().split("T")[0],
-      date_echeance: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString().split("T")[0],
-      client_id: "",
-      montant_ht: "",
-      taux_tva: 20,
-      montant_ttc: "",
-      statut: "brouillon"
-    });
-    
-    setIsModalOpen(false);
-  };
-
-  const handleMarkAsSent = async (id, e) => {
-    e.stopPropagation();
-    await markAsSent(id);
-  };
-
-  const handleMarkAsPaid = async (id, e) => {
-    e.stopPropagation();
-    await markAsPaid(id);
-  };
-
-  const handleDeleteFacture = async (id, e) => {
-    e.stopPropagation();
-    if (confirm("Êtes-vous sûr de vouloir supprimer cette facture ?")) {
-      await deleteFacture(id);
+    try {
+      const { error } = await supabase
+        .from("factures")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
+      
+      if (error) throw error;
+      
+      setFactures(prev => prev.filter(facture => facture.id !== id));
+      alert("Facture supprimée avec succès");
+    } catch (err) {
+      console.error("Erreur:", err);
+      alert("Erreur: " + err.message);
     }
-  };
+  }
 
-  // Fonction pour filtrer les factures
+  function formatDate(dateString) {
+    if (!dateString) return "";
+    const options = { day: '2-digit', month: '2-digit', year: 'numeric' };
+    return new Date(dateString).toLocaleDateString('fr-FR', options);
+  }
+
+  function formatMontant(montant) {
+    if (!montant) return "0,00 €";
+    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(montant);
+  }
+
+  function getStatusColor(status) {
+    const statusColors = {
+      "brouillon": "bg-gray-100 text-gray-800",
+      "envoyée": "bg-blue-100 text-blue-800",
+      "en retard": "bg-red-100 text-red-800",
+      "payée": "bg-green-100 text-green-800"
+    };
+    return statusColors[status] || "bg-gray-100 text-gray-800";
+  }
+
   const filteredFactures = () => {
     if (!factures.length) return [];
     
@@ -100,31 +302,17 @@ export default function FacturesPage() {
     }
   };
 
-  // Fonction pour formater la date
-  const formatDate = (dateString) => {
-    const options = { day: '2-digit', month: '2-digit', year: 'numeric' };
-    return new Date(dateString).toLocaleDateString('fr-FR', options);
-  };
-
-  // Fonction pour formater le montant
-  const formatMontant = (montant) => {
-    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(montant);
-  };
-
-  // Fonction pour obtenir la couleur du statut
-  const getStatusColor = (status) => {
-    const statusColors = {
-      "brouillon": "bg-gray-100 text-gray-800",
-      "envoyée": "bg-blue-100 text-blue-800",
-      "en retard": "bg-red-100 text-red-800",
-      "payée": "bg-green-100 text-green-800"
-    };
-    return statusColors[status] || "bg-gray-100 text-gray-800";
-  };
-
-  if (!user) {
-    return <div>Chargement...</div>;
+  function handleClientChange(e) {
+    const clientId = e.target.value;
+    const selectedClient = clients.find(c => c.id === parseInt(clientId));
+    setNewFacture({
+      ...newFacture,
+      client_id: clientId,
+      client_nom: selectedClient ? selectedClient.nom : ""
+    });
   }
+
+  if (!user) return null;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -228,7 +416,7 @@ export default function FacturesPage() {
           <div className="text-center py-12">Chargement...</div>
         ) : error ? (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-            Erreur: {error}
+            <strong>Erreur: </strong> {error}
           </div>
         ) : filteredFactures().length === 0 ? (
           <div className="text-center py-12">
@@ -273,13 +461,12 @@ export default function FacturesPage() {
                   <tr 
                     key={facture.id} 
                     className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.push(`/factures/${facture.id}`)}
                   >
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
                       {facture.numero}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {facture.client ? facture.client.nom : "Client inconnu"}
+                      {facture.client_nom || "Client inconnu"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatDate(facture.date_emission)}
@@ -328,9 +515,8 @@ export default function FacturesPage() {
           </div>
         )}
 
-        {/* Modal pour créer une facture */}
         {isModalOpen && (
-          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg overflow-hidden shadow-xl max-w-lg w-full">
               <div className="px-4 py-5 sm:p-6">
                 <h3 className="text-lg font-medium text-gray-900">Créer une nouvelle facture</h3>
@@ -343,7 +529,7 @@ export default function FacturesPage() {
                         id="numero"
                         value={newFacture.numero}
                         onChange={(e) => setNewFacture({...newFacture, numero: e.target.value})}
-                        className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       />
                     </div>
@@ -352,8 +538,8 @@ export default function FacturesPage() {
                       <select
                         id="client_id"
                         value={newFacture.client_id}
-                        onChange={(e) => setNewFacture({...newFacture, client_id: e.target.value})}
-                        className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        onChange={handleClientChange}
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       >
                         <option value="">Sélectionner un client</option>
@@ -371,7 +557,7 @@ export default function FacturesPage() {
                         id="date_emission"
                         value={newFacture.date_emission}
                         onChange={(e) => setNewFacture({...newFacture, date_emission: e.target.value})}
-                        className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       />
                     </div>
@@ -382,7 +568,7 @@ export default function FacturesPage() {
                         id="date_echeance"
                         value={newFacture.date_echeance}
                         onChange={(e) => setNewFacture({...newFacture, date_echeance: e.target.value})}
-                        className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       />
                     </div>
@@ -397,7 +583,7 @@ export default function FacturesPage() {
                         onChange={(e) => setNewFacture({...newFacture, montant_ht: e.target.value})}
                         step="0.01"
                         min="0"
-                        className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       />
                     </div>
@@ -410,7 +596,7 @@ export default function FacturesPage() {
                         onChange={(e) => setNewFacture({...newFacture, taux_tva: e.target.value})}
                         step="0.1"
                         min="0"
-                        className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                   </div>
@@ -420,12 +606,32 @@ export default function FacturesPage() {
                       id="statut"
                       value={newFacture.statut}
                       onChange={(e) => setNewFacture({...newFacture, statut: e.target.value})}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="brouillon">Brouillon</option>
                       <option value="envoyée">Envoyée</option>
                       <option value="payée">Payée</option>
                     </select>
+                  </div>
+                  <div>
+                    <label htmlFor="conditions_paiement" className="block text-sm font-medium text-gray-700">Conditions de paiement</label>
+                    <input
+                      type="text"
+                      id="conditions_paiement"
+                      value={newFacture.conditions_paiement}
+                      onChange={(e) => setNewFacture({...newFacture, conditions_paiement: e.target.value})}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="notes" className="block text-sm font-medium text-gray-700">Notes</label>
+                    <textarea
+                      id="notes"
+                      value={newFacture.notes}
+                      onChange={(e) => setNewFacture({...newFacture, notes: e.target.value})}
+                      rows={3}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
                   <div className="flex justify-end space-x-3 mt-6">
                     <button

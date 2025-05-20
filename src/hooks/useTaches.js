@@ -19,23 +19,27 @@ export function useTaches() {
     setError(null);
     
     try {
+      console.log("Récupération des tâches pour l'utilisateur:", user.id);
+      
+      // Requête simplifiée - sans les jointures
       const { data, error } = await supabase
         .from("taches")
-        .select(`
-          *,
-          client:client_id(id, nom),
-          prospect:prospect_id(id, nom)
-        `)
+        .select("*")
         .eq("user_id", user.id)
         .order("date_echeance", { ascending: true });
       
-      if (error) throw error;
+      if (error) {
+        console.error("Erreur Supabase:", error);
+        throw error;
+      }
       
+      console.log("Tâches récupérées:", data);
       setTaches(data || []);
-      return data;
+      return data || [];
     } catch (err) {
+      console.error("Erreur détaillée:", err);
       setError(err.message);
-      console.error("Erreur lors du chargement des tâches:", err);
+      toast.error(`Erreur lors du chargement des tâches: ${err.message}`);
       return [];
     } finally {
       setLoading(false);
@@ -50,26 +54,28 @@ export function useTaches() {
     setError(null);
     
     try {
-      const today = new Date().toISOString().split('T')[0];
+      console.log("Récupération des tâches en retard pour l'utilisateur:", user.id);
+      
+      const today = new Date().toISOString().split('T')[0]; // Format YYYY-MM-DD
+      console.log("Date d'aujourd'hui pour filtrage:", today);
       
       const { data, error } = await supabase
         .from("taches")
-        .select(`
-          *,
-          client:client_id(id, nom),
-          prospect:prospect_id(id, nom)
-        `)
+        .select("*")
         .eq("user_id", user.id)
         .neq("statut", "terminée")
-        .lt("date_echeance", today)
-        .order("date_echeance", { ascending: true });
+        .lt("date_echeance", today);
       
-      if (error) throw error;
+      if (error) {
+        console.error("Erreur Supabase pour les tâches en retard:", error);
+        throw error;
+      }
       
+      console.log("Tâches en retard récupérées:", data);
       return data || [];
     } catch (err) {
-      setError(err.message);
       console.error("Erreur lors du chargement des tâches en retard:", err);
+      // Ne pas bloquer avec une erreur, retourner simplement un tableau vide
       return [];
     } finally {
       setLoading(false);
@@ -91,22 +97,23 @@ export function useTaches() {
         created_at: new Date().toISOString()
       };
       
+      console.log("Création d'une tâche:", newTache);
+      
       const { data, error } = await supabase
         .from("taches")
         .insert([newTache])
-        .select(`
-          *,
-          client:client_id(id, nom),
-          prospect:prospect_id(id, nom)
-        `)
-        .single();
+        .select();
       
-      if (error) throw error;
+      if (error) {
+        console.error("Erreur Supabase:", error);
+        throw error;
+      }
       
       toast.success("Tâche créée avec succès");
-      setTaches(prev => [data, ...prev]);
-      return data;
+      setTaches(prev => [data[0], ...prev]);
+      return data[0];
     } catch (err) {
+      console.error("Erreur détaillée:", err);
       setError(err.message);
       toast.error(`Erreur: ${err.message}`);
       return null;
@@ -128,18 +135,13 @@ export function useTaches() {
         .update({ ...updates, updated_at: new Date().toISOString() })
         .eq("id", id)
         .eq("user_id", user.id)
-        .select(`
-          *,
-          client:client_id(id, nom),
-          prospect:prospect_id(id, nom)
-        `)
-        .single();
+        .select();
       
       if (error) throw error;
       
       toast.success("Tâche mise à jour avec succès");
-      setTaches(prev => prev.map(tache => tache.id === id ? data : tache));
-      return data;
+      setTaches(prev => prev.map(tache => tache.id === id ? data[0] : tache));
+      return data[0];
     } catch (err) {
       setError(err.message);
       toast.error(`Erreur: ${err.message}`);
