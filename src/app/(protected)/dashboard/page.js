@@ -1,5 +1,7 @@
 "use client";
 
+import DashboardChart from "@/components/dashboard/DashboardChart";
+
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useFactures } from "@/hooks/useFactures";
@@ -128,6 +130,7 @@ export default function Dashboard() {
         </div>
       </header>
 
+      <DashboardChart data={stats.factures} />
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {/* KPI financiers */}
         <div className="mb-8">
@@ -337,3 +340,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
+

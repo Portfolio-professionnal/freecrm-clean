@@ -1,5 +1,9 @@
 "use client";
 
+import { FiPlus, FiEdit2, FiTrash2, FiCalendar, FiList } from "react-icons/fi";
+
+import TaskCalendar from "@/components/taches/TaskCalendar";
+
 import { useEffect, useState } from "react";
 import { useTaches } from "@/hooks/useTaches";
 import { useClients } from "@/hooks/useClients";
@@ -11,7 +15,7 @@ import SearchBar from "@/components/ui/SearchBar";
 
 export default function TachesPage() {
   const { user } = useAuth();
-  const { taches, loading, fetchTaches, createTache, markAsDone, deleteTache } = useTaches();
+  const { taches, loading, error, fetchTaches, createTache, updateTache, markAsDone, deleteTache } = useTaches();
   const { clients, fetchClients } = useClients();
   const { prospects, fetchProspects } = useProspects();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -193,6 +197,19 @@ export default function TachesPage() {
         </div>
       </header>
 
+      <TaskCalendar 
+  tasks={filteredTaches}
+  onCreateTask={(newTask) => {
+    createTache(newTask);
+  }}
+  onViewTask={(id) => {
+    // Navigation vers la page de détail de la tâche
+    // router.push(/taches/);
+  }}
+  onUpdateTask={(id, updates) => {
+    updateTache(id, updates);
+  }}
+/>
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {/* Barre de recherche */}
         <SearchBar onSearch={handleSearch} placeholder="Rechercher une tâche..." />
@@ -429,3 +446,7 @@ export default function TachesPage() {
     </div>
   );
 }
+
+
+
+
